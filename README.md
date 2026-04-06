@@ -12,23 +12,26 @@ The methodology, prompts, Python tooling, and reference material are generalized
 
 ## Installation
 
-Add the skill to your Claude Code project-scoped configuration:
+This repo already contains the `.claude/skills/` directory structure. Copy it into your project:
 
 ```bash
-claude mcp add-skill atari-st-reverse-engineer /path/to/atarist-reverse-engineer-skill/SKILL.md
+# Clone the repo
+git clone https://github.com/mbackschat/atarist-reverse-engineer-skill.git
+
+# Copy the .claude directory into your project
+cp -r atarist-reverse-engineer-skill/.claude your-project/
 ```
 
-Or add it manually to `.claude/settings.json` in your project:
+Or, to keep it updatable, add it as a Git submodule at the project root and symlink:
 
-```json
-{
-  "skills": [
-    "/path/to/atarist-reverse-engineer-skill/SKILL.md"
-  ]
-}
+```bash
+cd your-project/
+git submodule add https://github.com/mbackschat/atarist-reverse-engineer-skill.git vendor/atarist-reverse-engineer-skill
+mkdir -p .claude/skills
+ln -s ../../vendor/atarist-reverse-engineer-skill/.claude/skills/atarist-reverse-engineer-skill .claude/skills/atarist-reverse-engineer-skill
 ```
 
-Replace `/path/to/` with the actual location where you cloned this repo.
+Claude Code automatically discovers `SKILL.md` files under `.claude/skills/` — no additional configuration needed.
 
 Once installed, the skill appears as the `/atari-st-reverse-engineer` slash command.
 
@@ -46,7 +49,7 @@ Claude will follow the 6-phase playbook automatically: scan the binary, identify
 
 ### Manual workflow
 
-If you prefer step-by-step control, follow [plan.md](plan.md) — the full reverse-engineering playbook.
+If you prefer step-by-step control, follow [plan.md](.claude/skills/atarist-reverse-engineer-skill/plan.md) — the full reverse-engineering playbook.
 
 ---
 
@@ -85,48 +88,39 @@ Binary File (.PRG / .TOS / .ACC / raw)
 ## File Structure
 
 ```
-atari-st-reverse-engineer-skill/
+your-project/
+├── .claude/
+│   └── skills/
+│       └── atarist-reverse-engineer-skill/
+│           ├── SKILL.md                           Skill definition (YAML frontmatter + instructions)
+│           ├── plan.md                            Step-by-step RE playbook (6 phases, 10 tips)
+│           │
+│           ├── prompts/
+│           │   ├── analysis-sections.md           9 template prompts for code section analysis
+│           │   ├── annotation-guide.md            Style guide for writing 68000 annotations
+│           │   └── review-checklist.md            3 reviewer agent prompts for cross-checking
+│           │
+│           ├── scripts/
+│           │   ├── disasm_atari.py                68000 disassembler & analyzer (Capstone-based)
+│           │   ├── annotations_template.py        Starter annotation file with format examples
+│           │   └── requirements.txt               Python dependency: capstone>=5.0.7
+│           │
+│           └── reference/
+│               ├── tos-quick-ref.md               Condensed TOS reference (327 lines)
+│               ├── TOS.TXT                        Complete TOS system call reference
+│               ├── GEMDOS.TXT                     Full GEMDOS reference
+│               ├── BIOS.TXT                       BIOS quick reference
+│               ├── BIOS_Calls _Trap_13.TXT        BIOS Trap #13 detailed reference
+│               ├── XBIOS.TXT                      XBIOS reference
+│               ├── AES.md                         AES reference
+│               ├── AES_CALL.TXT                   AES function calls (detailed)
+│               ├── GDOS_INF.TXT                   GDOS reference
+│               ├── SALAD.TXT                      System Assembly Language documentation
+│               ├── 68000_Assembly_Language.txt     68000 instruction set reference
+│               ├── INTRO68K.txt                   Introduction to 68000 programming
+│               └── atari.s                        Atari ST hardware register definitions
 │
-├── SKILL.md                           Skill definition (YAML frontmatter + instructions)
-├── plan.md                            Step-by-step RE playbook (6 phases, 10 tips)
-├── README.md                          This file
-│
-├── prompts/
-│   ├── analysis-sections.md           9 template prompts for code section analysis
-│   │                                  (entry point, I/O, exceptions, commands,
-│   │                                   assembler, screen, keyboard, file I/O, debugger)
-│   ├── annotation-guide.md            Style guide for writing 68000 annotations
-│   │                                  (block comments, inline comments, 68000 tricks,
-│   │                                   TOS call documentation, loop markers)
-│   └── review-checklist.md            3 reviewer agent prompts for cross-checking
-│                                      SOURCE.txt, ANALYSIS.md, and MANUAL.md
-│
-├── scripts/
-│   ├── disasm_atari.py                Generalized 68000 disassembler & analyzer (955 lines)
-│   │                                  Capstone-based with byte-pattern scanning for
-│   │                                  TRAP/Line-A/BSR/RTS identification
-│   ├── annotations_template.py        Starter annotation file with format examples
-│   └── requirements.txt               Python dependency: capstone>=5.0.7
-│
-└── reference/
-    ├── tos-quick-ref.md               Condensed TOS reference (327 lines):
-    │                                  GEMDOS/BIOS/XBIOS/Line-A function tables,
-    │                                  exception vectors, memory map, DTA layout,
-    │                                  basepage structure, keyboard scancodes,
-    │                                  screen formats, hardware registers
-    ├── TOS.TXT                        Complete TOS system call reference (270 KB)
-    ├── GEMDOS.TXT                     Full GEMDOS reference (file I/O, memory, console)
-    ├── BIOS.TXT                       BIOS quick reference
-    ├── BIOS_Calls _Trap_13.TXT        BIOS Trap #13 detailed reference
-    ├── XBIOS.TXT                      XBIOS reference (screen, mouse, timers, sound)
-    ├── AES.md                         AES (Application Environment Services) reference
-    ├── AES_CALL.TXT                   AES function calls (detailed)
-    ├── GDOS_INF.TXT                   GDOS (Graphical Device OS) reference
-    ├── SALAD.TXT                      System Assembly Language documentation
-    ├── 68000_Assembly_Language.txt     68000 instruction set reference
-    ├── INTRO68K.txt                   Introduction to 68000 programming
-    └── atari.s                        Atari ST hardware register definitions
-                                       (display, DMA, sound, MFP, ACIA)
+└── README.md                          This file
 ```
 
 ---

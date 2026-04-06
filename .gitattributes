@@ -1,2 +1,2 @@
 # Prevent any line ending or encoding conversions for reference files
-reference/** binary
+.claude/skills/atarist-reverse-engineer-skill/reference/** binary

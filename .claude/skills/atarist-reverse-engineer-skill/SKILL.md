@@ -32,19 +32,27 @@ You will produce three files in the working directory:
 2. **`ANALYSIS.md`** — Technical analysis document covering:
    - Binary structure (header, segments, sizes)
    - Memory layout map (all code regions identified)
+   - Global variable map (ALL base-register-relative offsets with size and purpose)
+   - State structure maps (for every structure pointer used, e.g., A3, A4)
    - Execution flow (startup → initialization → main loop)
    - Complete system call inventory
-   - Subroutine signatures (entry/exit registers and types)
-   - Data structure layouts discovered
-   - 68000 coding techniques and idioms used
-   - Key algorithms explained with pseudocode
+   - Shared utility routines catalog (dedicated table with entry/exit registers)
+   - Subsystem analysis with step-by-step algorithm descriptions and pseudocode
+   - Key dispatch / command dispatch with scancodes/codes AND handler addresses
+   - Screen rendering details (formulas, bitplane layout, resolution detection)
+   - Design patterns with actual code snippets and "why" explanations
+   - Background primer (TOS architecture, 68000 essentials) for non-expert readers
+   - 68000 coding techniques and idioms used, with code examples
+   - Statistics
 
-3. **`MANUAL.md`** — User manual (if the binary is an interactive tool):
-   - What the program does
-   - How to start it
-   - All commands, key bindings, modes
-   - Error messages and their meanings
-   - Quick reference card
+3. **`MANUAL.md`** — User documentation adapted to the program type:
+   - **Interactive tool** (editor, monitor, shell): Commands, key bindings, modes, error messages, quick reference
+   - **GEM application**: Menu structure, dialog descriptions, file selector usage
+   - **Game**: Controls (keyboard/joystick), gameplay mechanics, levels/modes
+   - **Demo/player**: How to run, what it shows/plays, system requirements
+   - **TSR/utility**: What it installs, how to configure, how to remove
+   - **Batch tool**: Command-line syntax, input/output formats
+   - If the binary has no user interaction (self-running demo, boot sector), MANUAL.md may be minimal or omitted.
 
 Additionally, write a **`CONTEXT.md`** that captures all accumulated knowledge for future sessions.
 
@@ -94,11 +102,13 @@ Follow the detailed step-by-step procedure in [plan.md](${CLAUDE_SKILL_DIR}/plan
 
 ### Phase 7: Pseudocode Generation
 1. Identify algorithms and main logic worth pseudocode treatment:
-   - Main loop and command dispatch
-   - Parsers (expression, number, opcode, directive)
+   - Main loop (command dispatch, frame loop, event loop — whatever pattern the binary uses)
+   - Parsers (expression, input, protocol, file format)
    - Search/sort/hash algorithms
-   - State machines (editor modes, assembler passes)
-   - Non-trivial math (multiply/divide emulation, coordinate transforms)
+   - State machines (modes, phases, protocol states)
+   - Non-trivial math (multiply/divide emulation, coordinate transforms, fixed-point)
+   - Graphics routines (sprite rendering, scrolling, palette manipulation)
+   - Sound routines (register sequencing, pattern playback)
    - Any routine whose 68000 implementation obscures the underlying logic
 2. For each, write clear pseudocode that:
    - Uses structured `if/else`, `while`, `for`, `switch` constructs
@@ -139,16 +149,18 @@ All reference documentation is bundled with the skill in `${CLAUDE_SKILL_DIR}/re
 ### Atari ST Executable Header (28 bytes)
 ```
 Offset  Size  Field
-$00     2     Magic ($601A)
-$02     4     TEXT segment size (code)
-$06     4     DATA segment size
-$0A     4     BSS segment size
-$0E     4     Symbol table size
-$12     4     Reserved
-$16     4     Flags
-$1A     2     Relocation flag ($0000=relocatable, $FFFF=absolute)
+0x00    2     Magic (0x601A)
+0x02    4     TEXT segment size (code)
+0x06    4     DATA segment size
+0x0A    4     BSS segment size
+0x0E    4     Symbol table size
+0x12    4     Reserved
+0x16    4     Flags
+0x1A    2     Relocation flag (0x0000=relocatable, 0xFFFF=absolute)
 ```
-Code starts at file offset 28 ($1C).
+Code starts at file offset 28 (0x1C).
+
+Note: Header offsets use 0x notation here to avoid template variable collision with the skill argument system.
 
 ### 68000 Register Conventions (typical for Atari ST programs)
 - **A7/SP**: Stack pointer

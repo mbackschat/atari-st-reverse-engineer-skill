@@ -4,9 +4,9 @@ A Claude Code skill that guides the reverse-engineering of Atari ST (Motorola 68
 
 - **`SOURCE.txt`** — Fully annotated 68000 disassembly listing
 - **`ANALYSIS.md`** — Technical analysis document
-- **`MANUAL.md`** — User manual (for interactive tools)
+- **`MANUAL.md`** — User manual (adapted to program type)
 
-The methodology, prompts, Python tooling, and reference material are generalized to work with any Atari ST binary.
+The methodology, prompts, Python tooling, and reference material are generalized to work with any Atari ST binary — not just development tools, but also games, demos, GEM applications, TSRs, and utilities.
 
 ---
 
@@ -45,7 +45,7 @@ Once installed, the skill appears as the `/atari-st-reverse-engineer` slash comm
 /atari-st-reverse-engineer path/to/BINARY.PRG
 ```
 
-Claude will follow the 6-phase playbook automatically: scan the binary, identify sections, analyze code with parallel agents, build annotations, generate all three deliverables, and review them.
+Claude will follow the 7-phase playbook automatically: scan the binary, determine program type, identify sections, analyze code with parallel agents, build annotations, generate all deliverables, review them, and add pseudocode.
 
 ### Manual workflow
 
@@ -63,7 +63,8 @@ Binary File (.PRG / .TOS / .ACC / raw)
     ├─ Phase 1: Setup ──────── Copy disassembler, install capstone via uv
     │
     ├─ Phase 2: Initial Scan ── Parse header, extract strings, find system calls,
-    │                            map subroutines, identify code vs data regions
+    │                            map subroutines, auto-detect data regions,
+    │                            determine program type (tool/game/demo/GEM/TSR)
     │
     ├─ Phase 3: Deep Analysis ─ Launch parallel agents to analyze each section:
     │                            trace logic, identify algorithms, document
@@ -73,11 +74,13 @@ Binary File (.PRG / .TOS / .ACC / raw)
     │                            (routine headers) and inline comments
     │                            (per-instruction explanations), regenerate listing
     │
-    ├─ Phase 5: Document ────── Write ANALYSIS.md (technical) and MANUAL.md (user)
-    │                            from the analysis findings
+    ├─ Phase 5: Document ────── Write ANALYSIS.md (technical, with global variable
+    │                            maps, utility catalog, design patterns, background
+    │                            primer) and MANUAL.md (adapted to program type)
     │
     ├─ Phase 6: Review ──────── Cross-check all deliverables against raw binary
-    │                            with parallel reviewer agents
+    │                            with parallel reviewer agents; verify annotation
+    │                            coverage (target ≥50% of instructions commented)
     │
     └─ Phase 7: Pseudocode ─── Write pseudocode for key algorithms and main logic,
                                  insert into ANALYSIS.md subsystem sections
@@ -96,9 +99,11 @@ your-project/
 │           ├── plan.md                            Step-by-step RE playbook (6 phases, 10 tips)
 │           │
 │           ├── prompts/
-│           │   ├── analysis-sections.md           9 template prompts for code section analysis
-│           │   ├── annotation-guide.md            Style guide for writing 68000 annotations
-│           │   └── review-checklist.md            3 reviewer agent prompts for cross-checking
+│           │   ├── analysis-sections.md           14 template prompts for code section analysis
+│           │   │                                  (generic + tool + GEM + game/demo + sound + TSR)
+│           │   ├── annotation-guide.md            Style guide with mandatory decode rules and
+│           │   │                                  structure field reference (basepage, DTA, Line-A)
+│           │   └── review-checklist.md            4 reviewer agent prompts including coverage check
 │           │
 │           ├── scripts/
 │           │   ├── disasm_atari.py                68000 disassembler & analyzer (Capstone-based)
@@ -142,22 +147,23 @@ python disasm_atari.py BINARY.PRG --prefix TOOLNAME
 ### What it does automatically
 
 - Parses the 28-byte Atari ST executable header ($601A magic)
-- Extracts all printable strings with their code offsets
+- Extracts all printable strings with quality filtering (rejects binary noise)
+- **Auto-detects data regions** (fonts, string tables, bitmaps) by heuristic: stretches with no code references or high-density ASCII
 - Identifies **TRAP #1** (GEMDOS), **TRAP #13** (BIOS), **TRAP #14** (XBIOS) system calls by scanning backwards from each TRAP instruction to find the function number push
 - Identifies **TRAP #2** (GEM AES/VDI) calls by detecting `MOVE.W #200,D0` (AES) or `MOVE.W #115,D0` (VDI), with best-effort function resolution from the parameter block
 - Identifies **Line-A** graphics calls ($A000–$A00F)
 - Maps all **BSR/JSR** call targets (subroutine entry points)
 - Maps all **Bcc/BRA** branch targets
 - Finds all **RTS/RTE** instructions (subroutine boundaries)
-- Resolves **LEA xxx(PC)** string and data references
+- Resolves **LEA xxx(PC)** string and data references (exported to analysis.json)
 - Produces a Capstone-based disassembly with all the above as annotations
 
 ### What you add during analysis
 
 - **`KNOWN_SUBS`** dict: map offsets to meaningful subroutine names
 - **`SECTIONS`** list: define section boundaries with descriptions
-- **Data regions**: mark font data, string tables, opcode tables
-- **`annotations.py`**: block and inline comments (loaded from working directory)
+- **`DATA_REGIONS`** list in annotations.py: manually mark font data, string tables, sprite data (supplements auto-detection)
+- **`annotations.py`**: block comments, inline comments, and data regions (loaded from working directory)
 
 ### Built-in TOS databases
 

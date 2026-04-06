@@ -425,26 +425,91 @@ class BytePatternAnalyzer:
         return False
 
     def identify_data_regions(self):
-        """Identify known data regions by content analysis.
+        """Identify data regions by heuristic analysis.
 
-        Override this method or add regions after calling it to mark
-        areas of the binary that contain data (fonts, string tables,
-        lookup tables) rather than executable code.
+        Detects stretches of binary that contain no branch/BSR/JSR targets
+        and no RTS instructions — likely font bitmaps, string tables, or
+        lookup tables rather than executable code.
 
-        Example:
-            analyzer.identify_data_regions()
-            analyzer.data_regions.append((0x5000, 0x5800))  # Font data
+        Additional regions can be specified in annotations.py via DATA_REGIONS.
         """
         regions = []
-        # No regions marked by default — add them during analysis
-        # as you discover font data, string tables, opcode tables, etc.
-        #
-        # Common Atari ST data region patterns:
-        # - Font bitmaps: dense blocks of bytes with glyph patterns
-        # - String tables: runs of printable ASCII + null terminators
-        # - Opcode tables: contain bytes like $4E4x that look like TRAP instructions
-        #
-        # Format: regions.append((start_offset, end_offset))
+        code = self.code
+        end = self.find_last_nonzero() + 1
+
+        # First pass: scan for code references (must run scan_all first or tolerate empty sets)
+        code_addrs = (self.bsr_targets | self.jsr_targets |
+                      self.branch_targets | set(self.rts_locations))
+
+        # Heuristic: find long stretches (>= WINDOW bytes) with no code references
+        WINDOW = 64
+        i = 0
+        while i < end - WINDOW:
+            has_code_ref = False
+            for a in code_addrs:
+                if i <= a < i + WINDOW:
+                    has_code_ref = True
+                    break
+            if not has_code_ref:
+                region_start = i
+                j = i + WINDOW
+                while j < end:
+                    has_ref = False
+                    for a in code_addrs:
+                        if j <= a < j + 4:
+                            has_ref = True
+                            break
+                    if has_ref:
+                        break
+                    j += 2
+                if j - region_start >= WINDOW:
+                    regions.append((region_start, j))
+                i = j
+            else:
+                i += 2
+
+        # Heuristic: detect high-density ASCII regions (string tables)
+        # Sliding window: if >80% of bytes are printable ASCII, mark as data
+        STR_WINDOW = 48
+        i = 0
+        while i < end - STR_WINDOW:
+            # Skip if already in a detected region
+            in_existing = False
+            for rs, re in regions:
+                if rs <= i < re:
+                    i = re
+                    in_existing = True
+                    break
+            if in_existing:
+                continue
+
+            printable = sum(1 for b in code[i:i+STR_WINDOW]
+                           if 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09, 0x00))
+            if printable >= STR_WINDOW * 0.80:
+                region_start = i
+                j = i + STR_WINDOW
+                while j < end:
+                    chunk = code[j:j+8]
+                    p = sum(1 for b in chunk if 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09, 0x00))
+                    if p < len(chunk) * 0.60:
+                        break
+                    j += 8
+                if j - region_start >= STR_WINDOW:
+                    regions.append((region_start, j))
+                i = j
+            else:
+                i += 2
+
+        # Merge overlapping regions and sort
+        if regions:
+            regions.sort()
+            merged = [regions[0]]
+            for rs, re in regions[1:]:
+                if rs <= merged[-1][1] + 4:
+                    merged[-1] = (merged[-1][0], max(merged[-1][1], re))
+                else:
+                    merged.append((rs, re))
+            regions = merged
 
         self.data_regions = regions
         return regions
@@ -801,6 +866,26 @@ class ListingGenerator:
         except ImportError:
             print("    No annotations.py found - generating without inline comments")
 
+        # Load manual data region overrides from annotations
+        try:
+            from annotations import DATA_REGIONS
+            for entry in DATA_REGIONS:
+                start, end = entry[0], entry[1]
+                self.analyzer.data_regions.append((start, end))
+            if DATA_REGIONS:
+                # Re-sort and merge after adding manual regions
+                regions = sorted(self.analyzer.data_regions)
+                merged = [regions[0]]
+                for rs, re in regions[1:]:
+                    if rs <= merged[-1][1] + 4:
+                        merged[-1] = (merged[-1][0], max(merged[-1][1], re))
+                    else:
+                        merged.append((rs, re))
+                self.analyzer.data_regions = merged
+                print(f"    Loaded {len(DATA_REGIONS)} manual data regions from annotations")
+        except (ImportError, AttributeError):
+            pass
+
     def _name_locations(self):
         """Assign names to all known locations."""
         a = self.analyzer
@@ -1116,6 +1201,20 @@ class ListingGenerator:
 
 
 # ============================================================================
+# Helpers
+# ============================================================================
+
+def _is_meaningful_string(s):
+    """Score whether a string looks like real text vs binary noise."""
+    if len(s) < 6:
+        return False
+    printable = sum(1 for c in s if c.isalnum() or c in ' .,;:!?()-+*/=<>@#$%&_"\'')
+    alpha = sum(1 for c in s if c.isalpha())
+    # At least 70% printable, at least 40% alphabetic
+    return (printable / len(s) >= 0.7) and (alpha / len(s) >= 0.4)
+
+
+# ============================================================================
 # Main
 # ============================================================================
 
@@ -1246,10 +1345,18 @@ def main():
             {'offset': f'0x{k:05X}', 'name': v}
             for k, v in sorted(gen.subroutines.items())
         ],
+        'lea_pc_refs': [
+            {
+                'offset': f'0x{off:05X}',
+                'target': f'0x{target:05X}',
+                'string': analyzer.strings.get(target, '')[:80]
+            }
+            for off, target in sorted(analyzer.lea_pc_refs.items())
+        ],
         'significant_strings': [
             {'offset': f'0x{k:05X}', 'text': v[:80]}
             for k, v in sorted(analyzer.strings.items())
-            if len(v) >= 6 and any(c.isalpha() for c in v[:10])
+            if _is_meaningful_string(v)
         ],
     }
 

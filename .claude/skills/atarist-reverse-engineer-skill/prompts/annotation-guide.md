@@ -57,20 +57,58 @@ Appended to the instruction line, separated by ` ; `.
   01240: 4E 4D        trap    #$d          ; trap 13                  ← BAD: no function identified
 ```
 
-### What to Always Comment
+### What to Always Comment (Mandatory Decodes)
+
+These patterns MUST always have inline comments — no exceptions:
 
 | Instruction Type | Comment Should Explain |
 |---|---|
-| `CMPI.B #$XX, Dn` | What the value represents (ASCII char? scancode? error code?) |
-| `Bcc` (any branch) | What the condition means in context ("If digit >= radix → invalid") |
-| `TRAP #n` | Which TOS function and its purpose |
-| `PEA $XXXXXXXX` | What the packed value means (function + parameter) |
-| `MOVE.W #$XXXX, SR` | What SR bits are being set (trace? supervisor? IPL?) |
-| `LEA xxx(PC), An` | What data the address points to (string? variable? table?) |
-| `MOVEM.L regs, -(SP)` | "Save registers per calling convention" or "Push register state" |
-| `BSR/JSR target` | Name of callee and what parameters are being passed |
+| `CMPI.B #$XX, Dn` | What the value represents: ASCII char (`$41`='A'), scancode (`$3B`=F1), error code, flag bit |
+| `Bcc` (any branch) | What the condition means in context ("If digit >= radix → invalid"), not just "branch if equal" |
+| `TRAP #n` | Which TOS function, its purpose, AND what the pushed parameters mean |
+| `PEA $XXXXXXXX` | Unpack: high word = function code, low word = parameter (e.g., "Kbshift(-1): read modifier state") |
+| `MOVE.W #$XXXX, SR` | What SR bits are being set: trace ($8000), supervisor ($2000), IPL ($0700) |
+| `LEA xxx(PC), An` | What data the target address contains (string? variable? table? structure?) |
+| `MOVE.x $NN(An), Dn` | The structure field name when An points to a known structure (basepage, DTA, AES pb, editor state) |
+| `MOVEM.L regs, -(SP)` | "Save registers per calling convention" or "Push register state for exception frame" |
+| `BSR/JSR target` | Name of callee and what parameters are being passed in which registers |
 | `RTS/RTE` | What the return value is (if any) in which register |
-| Magic numbers | Decode them: `$61` = 'a', `$3B` = F1 scancode, `$601A` = TOS magic |
+| Hardware addresses ($FFxxxx) | Register name and function (e.g., "$FF8240 = palette register 0") |
+| Magic numbers | Decode them: `$61`='a', `$3B`=F1 scancode, `$601A`=TOS magic, `$50005`=memory marker |
+
+### Structure Field Reference (for inline comments)
+
+When An points to a known structure, decode the offset:
+
+**TOS Basepage** (from Pexec or at program start):
+```
++$00 = low TPA address     +$04 = high TPA address
++$08 = text segment start  +$0C = text segment size
++$10 = data segment start  +$14 = data segment size
++$18 = BSS segment start   +$1C = BSS segment size
++$20 = DTA pointer          +$24 = parent basepage
++$28 = reserved             +$2C = environment string pointer
++$80 = command line (128 bytes)
+```
+
+**DTA (Disk Transfer Area)** (from Fsetdta/Fgetdta, after Fsfirst/Fsnext):
+```
++$00 = reserved (21 bytes)
++$15 = file attributes (byte): bit 0=r/o, 1=hidden, 2=system, 3=volume, 4=subdir, 5=archive
++$16 = time (word, packed): bits 15-11=hour, 10-5=minute, 4-0=seconds/2
++$18 = date (word, packed): bits 15-9=year-1980, 8-5=month, 4-0=day
++$1A = file size (longword)
++$1E = filename (14 bytes, null-terminated)
+```
+
+**Line-A Variables** (from $A000 init, pointer in A0):
+```
+-$15C = mouse X position    -$15A = mouse Y position
+-$3A = font header pointer  -$38 = font first ADE
+-$36 = font last ADE        -$34 = font max cell width
++$00 = V_PLANES (number of bitplanes)
++$02 = V_LIN_WR (bytes per screen line)
+```
 
 ---
 

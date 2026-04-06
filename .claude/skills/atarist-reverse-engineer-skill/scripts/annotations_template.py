@@ -10,7 +10,11 @@ BLOCK_COMMENTS: Multi-line comments inserted BEFORE the instruction at the offse
 INLINE_COMMENTS: Single-line comments appended to the instruction at the offset.
                  Used for per-instruction explanations.
 
-Both dictionaries are keyed by CODE OFFSET (not file offset).
+DATA_REGIONS:   Regions that contain data (not code) — fonts, string tables, bitmaps,
+                lookup tables. These will be rendered as hex dumps instead of
+                disassembled instructions.
+
+All dictionaries are keyed by CODE OFFSET (not file offset).
 Code offset = file offset - 28 (the 28-byte Atari ST header).
 """
 
@@ -60,3 +64,18 @@ INLINE_COMMENTS = {
     # 0x00F64: "Save original vector $10 (Illegal Instruction) to save area",
 
 }
+
+
+# ============================================================================
+# DATA REGIONS — areas to render as hex data instead of disassembly
+# ============================================================================
+
+DATA_REGIONS = [
+
+    # Format: (start_offset, end_offset, "description")
+    # Example:
+    # (0x05000, 0x05800, "Font bitmap data - high resolution"),
+    # (0x0A000, 0x0A800, "Font bitmap data - medium resolution"),
+    # (0x09A00, 0x09D00, "UI string table and help screen text"),
+
+]

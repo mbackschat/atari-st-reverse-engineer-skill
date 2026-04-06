@@ -97,3 +97,43 @@ Perform these checks:
 
 Report: what checks passed, what discrepancies found, suggested corrections.
 ```
+
+## Reviewer 4: Annotation Coverage and Quality
+
+```
+You are a reviewer agent. Check the annotation coverage and quality of SOURCE.txt.
+
+IMPORTANT: Stay within the working directory.
+
+Perform these checks:
+
+1. **Coverage ratio**: Count instruction lines vs commented lines.
+   Run: grep -cE '^\s+[0-9A-Fa-f]{5}:' SOURCE.txt  (total instructions)
+   Run: grep -cE '^\s+[0-9A-Fa-f]{5}:.*;\s' SOURCE.txt  (commented instructions)
+   Calculate percentage. Target: >=50%. Flag if below 30%.
+
+2. **Unexplained magic numbers**: Search for CMPI.B/CMPI.W with hex literals
+   that have no inline comment. Sample 10 from the listing. Each should have
+   a comment explaining what the value means (ASCII char, scancode, flag, etc.).
+   Run: grep 'cmpi\.' SOURCE.txt | grep -v ';' | head -10
+
+3. **Unexplained structure field accesses**: Search for instructions that access
+   base-register-relative offsets (e.g., $XX(a5), $XX(a3)) without comments.
+   Sample 10. Each should identify the field.
+   Run: grep -E '\$[0-9a-f]+\(a[3-6]\)' SOURCE.txt | grep -v ';' | head -10
+
+4. **Uncommented TRAP calls**: Verify ALL TRAP instructions have comments.
+   Run: grep 'trap' SOURCE.txt | grep -v '>>>'
+
+5. **Block comment coverage**: Count subroutines with and without block comments.
+   Run: grep -c '^; ----' SOURCE.txt  (generic/uncommented headers)
+   Run: grep -c '^; ---' SOURCE.txt  (all block comment headers)
+   Flag if >30% of subroutines lack descriptive block comments.
+
+6. **Data regions**: Check if there are large stretches (>100 lines) of dc.w
+   entries that look like data being disassembled as code. These should be
+   marked as DATA_REGIONS in annotations.py.
+
+Report: coverage percentage, count of unexplained items in each category,
+specific examples that need attention, and recommended improvements.
+```

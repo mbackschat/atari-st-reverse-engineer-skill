@@ -399,6 +399,7 @@ class BytePatternAnalyzer:
 
         # Results
         self.trap_calls = []       # (offset, trap_num, func_num, name, desc)
+        self.indirect_syscalls = [] # (caller_off, trap_num, func_num, name, desc, wrapper_off)
         self.linea_calls = []      # (offset, linea_num, name, desc)
         self.bsr_targets = set()
         self.jsr_targets = set()
@@ -794,6 +795,147 @@ class BytePatternAnalyzer:
             return func_num
 
         return None
+
+    def detect_indirect_syscalls(self):
+        """Detect system calls made through wrapper subroutines.
+
+        Many Atari ST programs route all GEMDOS/BIOS/XBIOS calls through a
+        single wrapper subroutine.  Pattern at each call site:
+            MOVE.W #$func, -(SP)    ; push function code
+            [push parameters]
+            BSR.W  wrapper_sub      ; call centralized wrapper
+            ADDQ.L #N, SP           ; clean stack
+
+        This method finds subroutines that contain a TRAP instruction, then
+        scans all BSR/JSR callers of those wrappers to extract the pushed
+        function codes — yielding the *indirect* system calls that the direct
+        TRAP scanner cannot see.
+        """
+        code = self.code
+        all_subs = sorted(self.bsr_targets | self.jsr_targets)
+        if not all_subs or not self.trap_calls:
+            return
+
+        # Map each TRAP to its containing wrapper subroutine:
+        # the nearest subroutine entry point at or before the TRAP offset.
+        wrapper_traps = {}  # wrapper_offset -> (trap_num,)
+        for trap_off, trap_num, func_num, name, desc in self.trap_calls:
+            # Find nearest preceding subroutine entry
+            best = None
+            for sub in all_subs:
+                if sub <= trap_off:
+                    best = sub
+                else:
+                    break
+            if best is not None and best != trap_off:
+                wrapper_traps[best] = trap_num
+
+        if not wrapper_traps:
+            return
+
+        # Build a map of all BSR/JSR call sites -> target
+        call_sites = {}  # caller_offset -> target_offset
+        end = self.find_last_nonzero() + 1
+        for i in range(0, end - 1, 2):
+            if self.is_in_data_region(i):
+                continue
+            w = struct.unpack('>H', code[i:i+2])[0]
+
+            # BSR.W (0x6100 + 16-bit displacement)
+            if w == 0x6100 and i + 3 < len(code):
+                disp = self.binary.sword_at(i + 2)
+                target = i + 2 + disp
+                if target in wrapper_traps:
+                    call_sites[i] = target
+
+            # BSR.B (0x61xx, xx != 00, xx != FF)
+            elif (w & 0xFF00) == 0x6100:
+                disp_byte = w & 0xFF
+                if disp_byte != 0x00 and disp_byte != 0xFF:
+                    disp = disp_byte if disp_byte < 0x80 else disp_byte - 256
+                    target = i + 2 + disp
+                    if target in wrapper_traps:
+                        call_sites[i] = target
+
+            # JSR d(PC) (0x4EBA)
+            elif w == 0x4EBA and i + 3 < len(code):
+                disp = self.binary.sword_at(i + 2)
+                target = i + 2 + disp
+                if target in wrapper_traps:
+                    call_sites[i] = target
+
+        # Already-known direct TRAP offsets — skip these
+        direct_trap_offsets = {t[0] for t in self.trap_calls}
+
+        # For each call site, scan backwards for the pushed function code
+        for caller_off, wrapper_off in sorted(call_sites.items()):
+            if caller_off in direct_trap_offsets:
+                continue
+
+            trap_num = wrapper_traps[wrapper_off]
+            # Skip GEM TRAP #2 — has a different calling convention
+            if trap_num == 2:
+                continue
+
+            db = {1: GEMDOS_CALLS, 13: BIOS_CALLS, 14: XBIOS_CALLS}.get(trap_num)
+            if db is None:
+                continue
+
+            func_num = None
+            for back in range(2, 60, 2):
+                check = caller_off - back
+                if check < 0:
+                    break
+
+                w = self.binary.word_at(check)
+
+                # MOVE.W #imm, -(SP) = 0x3F3C xxxx
+                if w == 0x3F3C:
+                    candidate = self.binary.word_at(check + 2)
+                    if candidate in db or candidate < 0x100:
+                        func_num = candidate
+                        break
+
+                # CLR.W -(SP) = 0x4267 -> function 0
+                if w == 0x4267:
+                    if trap_num == 1:
+                        func_num = 0  # Pterm0
+                        break
+
+                # PEA packed = 0x4879 xxxxxxxx
+                if w == 0x4879:
+                    long_val = self.binary.long_at(check + 2)
+                    hi = (long_val >> 16) & 0xFFFF
+                    lo = long_val & 0xFFFF
+                    if hi in db:
+                        func_num = hi
+                    elif lo in db:
+                        func_num = lo
+                    break
+
+                # MOVE.L #packed, -(SP) = 0x2F3C xxxxxxxx
+                if w == 0x2F3C:
+                    long_val = self.binary.long_at(check + 2)
+                    hi = (long_val >> 16) & 0xFFFF
+                    lo = long_val & 0xFFFF
+                    if hi in db:
+                        func_num = hi
+                    elif lo in db:
+                        func_num = lo
+                    break
+
+                # Stop at subroutine boundaries
+                if w == 0x4E75 or w == 0x4E73:  # RTS or RTE
+                    break
+
+            if func_num is not None:
+                if func_num in db:
+                    name, desc = db[func_num]
+                else:
+                    prefix = {1: "GEMDOS", 13: "BIOS", 14: "XBIOS"}[trap_num]
+                    name, desc = f"{prefix}_0x{func_num:02X}", "Unknown function"
+                self.indirect_syscalls.append(
+                    (caller_off, trap_num, func_num, name, desc, wrapper_off))
 
     def extract_strings(self, min_length=4):
         """Extract printable ASCII strings."""
@@ -1199,6 +1341,15 @@ class ListingGenerator:
         for la_off, la_num, name, desc in sorted(a.linea_calls):
             f.write(f";  ${la_off:05X}: Line-A {name} ($A{la_num:03X}) - {desc}\n")
 
+        if a.indirect_syscalls:
+            f.write(f"\n;{'-'*71}\n")
+            f.write(f"; Indirect System Calls (via wrapper subroutines)\n")
+            f.write(f";{'-'*71}\n\n")
+            for caller, trap_num, func_num, name, desc, wrapper in sorted(a.indirect_syscalls):
+                trap_type = {1: "GEMDOS", 13: "BIOS", 14: "XBIOS"}.get(trap_num, f"TRAP#{trap_num}")
+                f.write(f";  ${caller:05X}: {trap_type} {name} (${func_num:02X}) - {desc}"
+                        f"  [via wrapper ${wrapper:05X}]\n")
+
 
 # ============================================================================
 # Helpers
@@ -1266,6 +1417,10 @@ def main():
     print(f"    {len(analyzer.linea_calls)} Line-A calls")
     print(f"    {len(analyzer.lea_pc_refs)} LEA PC-relative references")
 
+    print("[3b] Detecting indirect system calls through wrappers...")
+    analyzer.detect_indirect_syscalls()
+    print(f"    {len(analyzer.indirect_syscalls)} indirect system calls found")
+
     # Print system call summary
     print("\n--- System Call Summary ---")
     gemdos = [(o,n,f,nm,d) for o,n,f,nm,d in analyzer.trap_calls if n == 1]
@@ -1300,6 +1455,13 @@ def main():
     for off, num, name, desc in sorted(analyzer.linea_calls):
         print(f"    ${off:05X}: {name} ($A{num:03X}) - {desc}")
 
+    if analyzer.indirect_syscalls:
+        print(f"\n  Indirect system calls (via wrappers): {len(analyzer.indirect_syscalls)}")
+        for caller, trap_num, func_num, name, desc, wrapper in sorted(analyzer.indirect_syscalls):
+            trap_type = {1: "GEMDOS", 13: "BIOS", 14: "XBIOS"}.get(trap_num, f"TRAP#{trap_num}")
+            print(f"    ${caller:05X}: {trap_type} {name} (${func_num:02X}) - {desc}"
+                  f"  [via ${wrapper:05X}]")
+
     # Phase 2: Generate listing
     output_dir = os.path.join(os.path.dirname(__file__), '..')
 
@@ -1329,6 +1491,7 @@ def main():
             'jsr_targets': len(analyzer.jsr_targets),
             'branch_targets': len(analyzer.branch_targets),
             'trap_calls': len(analyzer.trap_calls),
+            'indirect_syscalls': len(analyzer.indirect_syscalls),
             'linea_calls': len(analyzer.linea_calls),
             'strings': len(analyzer.strings),
             'subroutines': len(gen.subroutines),
@@ -1336,6 +1499,18 @@ def main():
         'trap_calls': [
             {'offset': f'0x{o:05X}', 'trap': n, 'func': f, 'name': nm, 'desc': d}
             for o, n, f, nm, d in sorted(analyzer.trap_calls)
+        ],
+        'indirect_syscalls': [
+            {
+                'caller': f'0x{caller:05X}',
+                'trap': trap_num,
+                'func': func_num,
+                'name': nm,
+                'desc': d,
+                'wrapper': f'0x{wrapper:05X}',
+            }
+            for caller, trap_num, func_num, nm, d, wrapper
+            in sorted(analyzer.indirect_syscalls)
         ],
         'linea_calls': [
             {'offset': f'0x{o:05X}', 'num': n, 'name': nm, 'desc': d}

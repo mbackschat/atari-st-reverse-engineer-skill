@@ -425,160 +425,62 @@ class BytePatternAnalyzer:
                 return True
         return False
 
-    def _has_valid_68k_opcodes(self, start, end):
-        """Check if a region contains patterns consistent with 68000 code.
-
-        Uses Capstone to try disassembling the region. If a significant fraction
-        of the bytes can be decoded as valid instructions, it's probably code.
-        This is intentionally conservative — we'd rather leave code unmarked
-        than wrongly suppress disassembly.
-        """
-        from capstone import Cs, CS_ARCH_M68K, CS_MODE_M68K_000
-        code = self.code
-        region_len = min(end, len(code)) - start
-        if region_len < 4:
-            return False
-
-        md = Cs(CS_ARCH_M68K, CS_MODE_M68K_000)
-        decoded_bytes = 0
-        for insn in md.disasm(code[start:min(end, len(code))], start):
-            decoded_bytes += insn.size
-
-        # If Capstone can decode >= 60% of the bytes as valid instructions,
-        # this region likely contains code, not data
-        return (decoded_bytes / region_len) >= 0.60
-
     def identify_data_regions(self):
-        """Identify data regions by heuristic analysis.
+        """Identify data regions from the DATA segment and known strings.
 
-        Detects stretches of binary that contain no branch/BSR/JSR targets
-        and no RTS instructions — likely font bitmaps, string tables, or
-        lookup tables rather than executable code.
+        Atari ST executables define TEXT and DATA segment sizes in the header.
+        Code lives in TEXT, data in DATA.  If there's a DATA segment, everything
+        after text_size is data.
 
-        CONSERVATIVE: errs on the side of NOT marking regions as data.
-        Falsely marking code as data is much worse than leaving data as code.
+        Within the TEXT segment, strings are embedded inline (accessed via LEA
+        PC-relative).  We use extract_strings() to find their exact locations —
+        no heuristic window scanning needed.  Only strings that pass the
+        _is_meaningful_string quality filter are marked as data.
 
         Additional regions can be specified in annotations.py via DATA_REGIONS.
         """
-        regions = []
         code = self.code
-        end = self.find_last_nonzero() + 1
+        text_size = self.binary.text_size
+        data_size = self.binary.data_size
+        regions = []
 
-        # First pass: scan for code references (must run scan_all first or tolerate empty sets)
-        code_addrs = (self.bsr_targets | self.jsr_targets |
-                      self.branch_targets | self.bra_targets | set(self.rts_locations))
+        # If there's a separate DATA segment, mark it
+        if data_size > 0 and text_size < len(code):
+            regions.append((text_size, text_size + data_size))
 
-        # Heuristic: find long stretches (>= WINDOW bytes) with no code references
-        # Use a large window to avoid marking short code sequences as data
-        WINDOW = 128
-        i = 0
-        while i < end - WINDOW:
-            has_code_ref = False
-            for a in code_addrs:
-                if i <= a < i + WINDOW:
-                    has_code_ref = True
-                    break
-            if not has_code_ref:
-                region_start = i
-                j = i + WINDOW
-                while j < end:
-                    has_ref = False
-                    for a in code_addrs:
-                        if j <= a < j + 4:
-                            has_ref = True
-                            break
-                    if has_ref:
-                        break
-                    j += 2
-                if j - region_start >= WINDOW:
-                    regions.append((region_start, j))
-                i = j
+        # Extract strings and mark each one as a data region.
+        # Only mark meaningful strings (real text, not code-byte noise).
+        strings = {}
+        current = []
+        start = -1
+        for idx, b in enumerate(code):
+            if 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09):
+                if not current:
+                    start = idx
+                current.append(chr(b))
             else:
-                i += 2
+                if len(current) >= 4:
+                    strings[start] = ''.join(current)
+                current = []
+                start = -1
+        if len(current) >= 4:
+            strings[start] = ''.join(current)
 
-        # Heuristic: detect high-density ASCII regions (string tables)
-        # Sliding window: if >80% of bytes are printable ASCII, mark as data
-        STR_WINDOW = 48
-        i = 0
-        while i < end - STR_WINDOW:
-            # Skip if already in a detected region
-            in_existing = False
-            for rs, re in regions:
-                if rs <= i < re:
-                    i = re
-                    in_existing = True
-                    break
-            if in_existing:
-                continue
+        for str_off, s in strings.items():
+            # Only mark strings >= 20 chars as data regions.
+            # Short strings embedded between instructions are common and
+            # harmless when disassembled (they show as dc.w with a string
+            # annotation).  Marking them as data risks covering adjacent code.
+            if len(s) >= 20 and _is_meaningful_string(s):
+                # Include null terminator(s) after the string
+                str_end = str_off + len(s)
+                while str_end < len(code) and code[str_end] == 0:
+                    str_end += 1
+                regions.append((str_off, str_end))
 
-            chunk = code[i:i+STR_WINDOW]
-            printable = sum(1 for b in chunk
-                           if 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09, 0x00))
-            # Require actual visible ASCII (not just nulls/control chars) to be at least 40%
-            visible = sum(1 for b in chunk if 0x20 <= b <= 0x7E)
-            if printable >= STR_WINDOW * 0.80 and visible >= STR_WINDOW * 0.40:
-                region_start = i
-                j = i + STR_WINDOW
-                while j < end:
-                    chunk = code[j:j+8]
-                    p = sum(1 for b in chunk if 0x20 <= b <= 0x7E or b in (0x0A, 0x0D, 0x09, 0x00))
-                    if p < len(chunk) * 0.60:
-                        break
-                    j += 8
-                if j - region_start >= STR_WINDOW:
-                    regions.append((region_start, j))
-                i = j
-            else:
-                i += 2
-
-        # Merge overlapping regions and sort
-        if regions:
-            regions.sort()
-            merged = [regions[0]]
-            for rs, re in regions[1:]:
-                if rs <= merged[-1][1] + 4:
-                    merged[-1] = (merged[-1][0], max(merged[-1][1], re))
-                else:
-                    merged.append((rs, re))
-            regions = merged
-
-        # Post-filter: remove data regions that contain code references
-        # or look like valid 68000 code
-        if regions:
-            filtered = []
-            for rs, re in regions:
-                refs_inside = sum(1 for a in code_addrs if rs <= a < re)
-                if refs_inside > 0:
-                    continue  # Code refs inside — not pure data
-
-                # Check if region is reached by fall-through from code above.
-                # If the word before the region is NOT a terminator (RTS, RTE,
-                # unconditional BRA, JMP, STOP), then code flows into this region.
-                if rs >= 2:
-                    prev_word = struct.unpack('>H', code[rs-2:rs])[0]
-                    # RTS=$4E75, RTE=$4E73, JMP abs.L=$4EF9, STOP=$4E72
-                    terminators = {0x4E75, 0x4E73, 0x4EF9, 0x4E72}
-                    # BRA.B = $60xx (xx != 00, xx != FF)
-                    is_bra_b = ((prev_word & 0xFF00) == 0x6000 and
-                                (prev_word & 0xFF) not in (0x00, 0xFF))
-                    if rs >= 4:
-                        prev_long = struct.unpack('>HH', code[rs-4:rs])
-                        # BRA.W = $6000 xxxx
-                        is_bra_w = (prev_long[0] == 0x6000)
-                    else:
-                        is_bra_w = False
-
-                    if prev_word not in terminators and not is_bra_b and not is_bra_w:
-                        continue  # Fall-through code, not data
-
-                # Check if the region contains valid 68000 opcodes — if so,
-                # it's probably code, not data.  Skip string-table regions
-                # (those are identified by the ASCII heuristic, not this check).
-                if self._has_valid_68k_opcodes(rs, re):
-                    continue
-
-                filtered.append((rs, re))
-            regions = filtered
+        # Sort but do NOT merge — each string is a precise data region.
+        # Merging risks bridging across code bytes between adjacent strings.
+        regions.sort()
 
         self.data_regions = regions
         return regions

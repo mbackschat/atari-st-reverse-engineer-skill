@@ -15,7 +15,7 @@ You are performing a deep reverse-engineering analysis of an Atari ST (Motorola 
 
 The target binary is: **`$ARGUMENTS`**
 
-If a launcher .PRG and payload binary are separate files, focus on the payload binary — that's where the actual code lives.
+If a launcher .PRG and payload binary are separate files, focus on the payload binary — that's where the actual code lives. To detect launchers: if the target .PRG is small (<5KB), extract strings to look for references to other binaries (`.PRG`, `.PET`, `.BIN`, etc.), check for Pexec ($4B) calls, and if confirmed as a loader, switch to the payload file.
 
 ## Deliverables
 
@@ -84,10 +84,11 @@ Follow the detailed step-by-step procedure in [plan.md](${CLAUDE_SKILL_DIR}/plan
 
 ### Phase 4: Build Annotations and Regenerate
 1. Create `tools/annotations.py` with BLOCK_COMMENTS and INLINE_COMMENTS dicts
-2. Add block comments for every identified subroutine (purpose, registers)
-3. Add inline comments for non-trivial instructions
-4. Add entries to KNOWN_SUBS and SECTIONS in the disassembler
-5. Regenerate: `cd tools && uv run python disasm_atari.py ../BINARY --prefix NAME`
+2. Add block comments for every identified subroutine — be detailed: explain the algorithm, data structures, arguments, and return values
+3. Add inline comments for non-trivial instructions — **maintain ≥60% density from start to finish** (do NOT let density drop off after the first few hundred lines)
+4. Add DATA_REGIONS only for areas you are **certain** are data — falsely marking code as data is far worse than leaving data as code
+5. Add entries to KNOWN_SUBS and SECTIONS in the disassembler
+6. Regenerate: `cd tools && uv run python disasm_atari.py ../BINARY --prefix NAME`
 
 ### Phase 5: Write Documentation
 1. Write `ANALYSIS.md` from the analysis findings

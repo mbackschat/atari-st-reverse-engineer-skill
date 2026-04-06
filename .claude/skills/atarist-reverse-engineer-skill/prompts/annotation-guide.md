@@ -4,6 +4,25 @@ How to write effective annotations for 68000 Atari ST disassembly listings.
 
 ---
 
+## CRITICAL: Maintain Consistent Comment Density Throughout
+
+**The #1 annotation failure mode is starting strong, then tapering off.** The first few hundred lines get rich inline comments, then density drops to near-zero for the rest of the binary. This is unacceptable.
+
+**Rules to prevent density drop-off:**
+- Inline comment density MUST remain >=60% of instruction lines from start to finish
+- Process the binary in sections/chunks — annotate each chunk to the same standard before moving on
+- After generating annotations, VERIFY density by checking comment count in the first 500 lines vs the last 500 lines — they should be comparable
+- Every subroutine MUST have a block comment, no matter how late in the binary it appears
+- Every TRAP/system call, every magic number, every branch condition MUST have an inline comment — this applies to line 5000 just as much as line 50
+
+**Block comments must be detailed:**
+- Don't just name the subroutine — explain the algorithm, its logic, and its inner workings
+- Document all data structures the routine operates on
+- Explain arguments (what registers carry what meaning) and return values
+- If the routine implements a non-trivial algorithm, describe the steps
+
+---
+
 ## Block Comments (Before Subroutines)
 
 Place before every identified subroutine. Include purpose, algorithm description, and register conventions.

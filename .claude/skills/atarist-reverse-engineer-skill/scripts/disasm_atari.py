@@ -425,12 +425,38 @@ class BytePatternAnalyzer:
                 return True
         return False
 
+    def _has_valid_68k_opcodes(self, start, end):
+        """Check if a region contains patterns consistent with 68000 code.
+
+        Uses Capstone to try disassembling the region. If a significant fraction
+        of the bytes can be decoded as valid instructions, it's probably code.
+        This is intentionally conservative — we'd rather leave code unmarked
+        than wrongly suppress disassembly.
+        """
+        from capstone import Cs, CS_ARCH_M68K, CS_MODE_M68K_000
+        code = self.code
+        region_len = min(end, len(code)) - start
+        if region_len < 4:
+            return False
+
+        md = Cs(CS_ARCH_M68K, CS_MODE_M68K_000)
+        decoded_bytes = 0
+        for insn in md.disasm(code[start:min(end, len(code))], start):
+            decoded_bytes += insn.size
+
+        # If Capstone can decode >= 60% of the bytes as valid instructions,
+        # this region likely contains code, not data
+        return (decoded_bytes / region_len) >= 0.60
+
     def identify_data_regions(self):
         """Identify data regions by heuristic analysis.
 
         Detects stretches of binary that contain no branch/BSR/JSR targets
         and no RTS instructions — likely font bitmaps, string tables, or
         lookup tables rather than executable code.
+
+        CONSERVATIVE: errs on the side of NOT marking regions as data.
+        Falsely marking code as data is much worse than leaving data as code.
 
         Additional regions can be specified in annotations.py via DATA_REGIONS.
         """
@@ -443,7 +469,8 @@ class BytePatternAnalyzer:
                       self.branch_targets | self.bra_targets | set(self.rts_locations))
 
         # Heuristic: find long stretches (>= WINDOW bytes) with no code references
-        WINDOW = 64
+        # Use a large window to avoid marking short code sequences as data
+        WINDOW = 128
         i = 0
         while i < end - WINDOW:
             has_code_ref = False
@@ -516,7 +543,7 @@ class BytePatternAnalyzer:
             regions = merged
 
         # Post-filter: remove data regions that contain code references
-        # (indicates interleaved code+strings, not pure data)
+        # or look like valid 68000 code
         if regions:
             filtered = []
             for rs, re in regions:
@@ -526,11 +553,11 @@ class BytePatternAnalyzer:
 
                 # Check if region is reached by fall-through from code above.
                 # If the word before the region is NOT a terminator (RTS, RTE,
-                # unconditional BRA, JMP), then code flows into this region.
+                # unconditional BRA, JMP, STOP), then code flows into this region.
                 if rs >= 2:
                     prev_word = struct.unpack('>H', code[rs-2:rs])[0]
-                    # RTS=$4E75, RTE=$4E73, JMP abs.L=$4EF9
-                    terminators = {0x4E75, 0x4E73, 0x4EF9}
+                    # RTS=$4E75, RTE=$4E73, JMP abs.L=$4EF9, STOP=$4E72
+                    terminators = {0x4E75, 0x4E73, 0x4EF9, 0x4E72}
                     # BRA.B = $60xx (xx != 00, xx != FF)
                     is_bra_b = ((prev_word & 0xFF00) == 0x6000 and
                                 (prev_word & 0xFF) not in (0x00, 0xFF))
@@ -543,6 +570,12 @@ class BytePatternAnalyzer:
 
                     if prev_word not in terminators and not is_bra_b and not is_bra_w:
                         continue  # Fall-through code, not data
+
+                # Check if the region contains valid 68000 opcodes — if so,
+                # it's probably code, not data.  Skip string-table regions
+                # (those are identified by the ASCII heuristic, not this check).
+                if self._has_valid_68k_opcodes(rs, re):
+                    continue
 
                 filtered.append((rs, re))
             regions = filtered
@@ -1141,7 +1174,7 @@ class ListingGenerator:
 
             while offset <= last_nonzero:
                 # Check if we're entering a new section
-                self._check_section(f, offset, prev_section_idx)
+                prev_section_idx = self._check_section(f, offset, prev_section_idx)
 
                 # Check if this is a data region
                 in_data = False
@@ -1202,16 +1235,19 @@ class ListingGenerator:
 
     def _check_section(self, f, offset, prev_idx):
         for idx, (sec_off, sec_name) in enumerate(self.SECTIONS):
-            if offset == sec_off or (offset > sec_off and idx > 0 and
-                offset < self.SECTIONS[idx][0] + 4 and offset >= self.SECTIONS[idx][0]):
+            if offset == sec_off and idx != prev_idx:
                 # Split multi-line section name: first line is the title, rest are description
                 lines = sec_name.split('\n')
                 f.write(f"\n;{'='*71}\n")
                 f.write(f"; Section: {lines[0]} (${sec_off:05X})\n")
                 for line in lines[1:]:
-                    f.write(f"{line}\n")
+                    if not line.startswith(';'):
+                        f.write(f"; {line}\n")
+                    else:
+                        f.write(f"{line}\n")
                 f.write(f";{'='*71}\n\n")
-                break
+                return idx
+        return prev_idx
 
     def _write_instruction(self, f, insn, offset):
         """Write a single disassembled instruction with annotations."""
@@ -1402,7 +1438,23 @@ def _is_meaningful_string(s):
     printable = sum(1 for c in s if c.isalnum() or c in ' .,;:!?()-+*/=<>@#$%&_"\'')
     alpha = sum(1 for c in s if c.isalpha())
     # At least 70% printable, at least 40% alphabetic
-    return (printable / len(s) >= 0.7) and (alpha / len(s) >= 0.4)
+    if not ((printable / len(s) >= 0.7) and (alpha / len(s) >= 0.4)):
+        return False
+    # Filter out strings that look like 68000 instruction byte patterns.
+    # Common false positives: "Nu" (RTS=$4E75), "NV" (LINK=$4E56),
+    # "N^" (UNLK=$4E5E), "Nq" (NOP=$4E71), "Hn" (MOVEM), "/?" (MOVE to stack)
+    noise_patterns = ('NuNV', 'NVH', 'N^Nu', 'NqNu', 'HnNV', 'Nu/', 'NV\x00',
+                       'p\x00Nu', '/\x00N')
+    for pat in noise_patterns:
+        if pat in s:
+            return False
+    # Reject strings dominated by repeated 2-char fragments (instruction pairs)
+    if len(s) >= 8:
+        bigrams = [s[i:i+2] for i in range(0, len(s)-1, 2)]
+        unique_ratio = len(set(bigrams)) / len(bigrams)
+        if unique_ratio < 0.3:
+            return False
+    return True
 
 
 # ============================================================================
@@ -1462,10 +1514,10 @@ def main():
 
     # Strings-only mode: just show strings and exit
     if args.strings_only:
-        print("\n--- Extracted Strings (length >= 6, alphabetic) ---")
+        print("\n--- Extracted Strings (length >= 6, meaningful) ---")
         for offset in sorted(analyzer.strings.keys()):
             s = analyzer.strings[offset]
-            if len(s) >= 6 and any(c.isalpha() for c in s[:10]):
+            if _is_meaningful_string(s):
                 safe = s.replace('\n', '\\n').replace('\r', '\\r')[:80]
                 print(f"  ${offset:05X}: \"{safe}\"")
         return
@@ -1573,6 +1625,7 @@ def main():
             {'offset': f'0x{k:05X}', 'name': v}
             for k, v in sorted(gen.subroutines.items())
         ],
+        # lea_pc_refs format: [{"offset": "0xHHHHH", "target": "0xHHHHH", "string": "..."}, ...]
         'lea_pc_refs': [
             {
                 'offset': f'0x{off:05X}',

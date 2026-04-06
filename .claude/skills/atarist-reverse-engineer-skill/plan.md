@@ -10,6 +10,12 @@ This is the step-by-step procedure for producing a fully annotated disassembly, 
 - Determine: which file is the main binary? (Some tools use a launcher .PRG that loads a separate payload file)
 - Note the file size, date, any version info visible in `strings` output
 - Run `file` command to confirm it's a 68000 executable
+- **Detect launcher PRGs**: If the target .PRG is small (<5KB):
+  1. Run: `strings TARGET.PRG | grep -iE '\.(prg|tos|app|pet|bin|ovl|dat)'`
+  2. If filenames found, check if those files exist in the same directory
+  3. Examine the disassembly for Pexec ($4B) GEMDOS calls
+  4. If confirmed as loader (small PRG + Pexec + references another binary): switch the target to the payload binary and note the launcher relationship
+  5. Even if not auto-switching, flag any file references found in the launcher's strings for manual review
 - **Verify the header**: Check for the `$601A` magic at file offset 0. If not present:
   - The file may be a raw binary (headerless) — set HEADER_SIZE=0 and determine the load address from the loader or documentation
   - It may use a non-standard packer — check for ICE!, LZ77, XPK signatures
@@ -277,7 +283,8 @@ Verify the output, iterate.
 ### 4.8 Annotation coverage targets
 Aim for these minimum levels:
 - **Inline comments**: ≥60% of instruction lines should have a comment. Every CMPI/branch pair, every TRAP call, every structure field access, every magic number must be explained.
-- **Block comments**: Every subroutine must have a block comment with purpose, entry/exit registers, and algorithm description.
+- **CRITICAL — Uniform density**: Comment density MUST NOT drop off as the binary progresses. The last 500 lines of SOURCE.txt must be annotated to the same standard as the first 500 lines. Process the binary in sections and annotate each section fully before moving on.
+- **Block comments**: Every subroutine must have a block comment with purpose, entry/exit registers, and algorithm description. Be detailed — explain the algorithm's logic, data structures, and inner workings. Don't just name it.
 - **No unexplained magic numbers**: Every hex literal that isn't self-evident (ASCII codes, structure offsets, hardware addresses, flag bits, scancodes) must be decoded in an inline comment.
 - **Explain for non-experts**: Where a code pattern depends on Atari ST or 68000-specific knowledge, add a multi-line explanation. Don't just say "Kbshift(-1)" — say "Read keyboard modifier state: bit 0=RShift, 1=LShift, 2=Ctrl, 3=Alt, 4=CapsLock".
 

@@ -6,13 +6,20 @@ the dictionaries with comments discovered during code analysis.
 
 BLOCK_COMMENTS: Multi-line comments inserted BEFORE the instruction at the offset.
                 Used for subroutine headers, algorithm descriptions, section intros.
+                EVERY subroutine must have a block comment — be detailed about the
+                algorithm, data structures, arguments, and return values.
 
 INLINE_COMMENTS: Single-line comments appended to the instruction at the offset.
                  Used for per-instruction explanations.
+                 CRITICAL: Maintain >=60% comment density from start to finish.
+                 Do NOT let density drop off after the first few hundred lines.
+                 Every section of the binary must be annotated to the same standard.
 
 DATA_REGIONS:   Regions that contain data (not code) — fonts, string tables, bitmaps,
                 lookup tables. These will be rendered as hex dumps instead of
                 disassembled instructions.
+                CONSERVATIVE: Only add regions you are certain are data. It is far
+                worse to mark code as data than to leave data as code.
 
 All dictionaries are keyed by CODE OFFSET (not file offset).
 Code offset = file offset - 28 (the 28-byte Atari ST header).

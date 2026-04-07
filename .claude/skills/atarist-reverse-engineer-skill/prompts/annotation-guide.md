@@ -196,6 +196,51 @@ For packed BIOS calls:
 
 ---
 
+## GEM AES/VDI Call Annotations
+
+GEM calls use TRAP #2 with parameters in arrays, not on the stack. Annotate the setup and the call:
+
+```
+  ; --- AES evnt_multi: wait for message or keyboard event ---
+  ; Sets up: Int_In[0] = MU_MESAG | MU_KEYBD ($11)
+  02A00: 33 7C 00 11 XX XX  move.w  #$11, $xxxx(a5)  ; event flags: MU_MESAG($10) | MU_KEYBD($01)
+  02A06: 23 7C XX XX XX XX  move.l  #aes_params, d1   ; AES parameter block address
+  02A0C: 30 3C 00 C8        move.w  #$c8, d0          ; $C8 = 200 = AES selector
+  02A10: 4E 42              trap    #$2               ; >>> AES evnt_multi(25) — wait for events
+  ; Int_Out[0] = which events occurred (check bits)
+  ; Int_Out[5] = key code if MU_KEYBD
+```
+
+For VDI calls, annotate the workstation handle and key parameters:
+
+```
+  ; --- VDI vs_clip: enable clipping to window work area ---
+  02B00: 33 7C 00 01 XX XX  move.w  #1, intin         ; intin[0] = 1 (clipping ON)
+  ; ptsin[0-3] = clipping rectangle (x1, y1, x2, y2) set earlier
+  02B06: 23 7C XX XX XX XX  move.l  #vdi_params, d1   ; VDI parameter block
+  02B0C: 30 3C 00 73        move.w  #$73, d0          ; $73 = 115 = VDI selector
+  02B10: 4E 42              trap    #$2               ; >>> VDI vs_clip(129) — set clipping rect
+```
+
+For AES message handling (after evnt_multi), annotate the message type dispatch:
+
+```
+  ; --- Message dispatch: msg[0] = message type ---
+  02C00: 30 2D XX XX        move.w  msg_buf(a5), d0   ; msg[0] = message type
+  02C04: 0C 40 00 0A        cmpi.w  #$a, d0           ; MN_SELECTED (10)?
+  02C08: 67 XX              beq.b   handle_menu       ; Yes → menu item was clicked
+  02C0A: 0C 40 00 14        cmpi.w  #$14, d0          ; WM_REDRAW (20)?
+  02C0E: 67 XX              beq.b   handle_redraw     ; Yes → window needs redraw
+  02C10: 0C 40 00 16        cmpi.w  #$16, d0          ; WM_CLOSED (22)?
+  02C14: 67 XX              beq.b   handle_close      ; Yes → close button clicked
+  02C16: 0C 40 00 1B        cmpi.w  #$1b, d0          ; WM_SIZED (27)?
+  02C1A: 67 XX              beq.b   handle_resize     ; Yes → window resize requested
+```
+
+See `${CLAUDE_SKILL_DIR}/reference/gem-quick-ref.md` for full AES/VDI parameter details.
+
+---
+
 ## Call Site Annotations
 
 When a BSR/JSR calls a known routine, document what parameters are being passed:

@@ -164,6 +164,78 @@ Direct opcodes in code (not TRAP-based). The 68000 interprets these as "Line-A e
 
 ---
 
+## GEM AES Functions (TRAP #2, D0=200)
+
+Call convention: `MOVE.L #aes_params,D1; MOVE.W #200,D0; TRAP #2` — no stack cleanup needed.
+
+Parameter block: AES_Params → Control[5], Global[14], Int_In[16], Int_Out[7], Addr_In[3], Addr_Out[1].
+Control[0]=function#, Int_Out[0]=return value.
+
+| Func# | Name | Key Parameters | Description |
+|---|---|---|---|
+| 10 | appl_init | — | Register app; returns ap_id |
+| 19 | appl_exit | — | Deregister app |
+| 20 | evnt_keybd | — | Wait for key; Out[0]=key |
+| 23 | evnt_mesag | Addr_In[0]=msg_buf | Wait for message |
+| 25 | evnt_multi | In[0]=event_flags | Wait for multiple events |
+| 30 | menu_bar | In[0]=show; Addr_In[0]=tree | Show/hide menu |
+| 42 | objc_draw | In[0]=obj, In[1]=depth; Addr_In[0]=tree | Draw object tree |
+| 50 | form_do | In[0]=start; Addr_In[0]=tree | Handle dialog |
+| 52 | form_alert | In[0]=default; Addr_In[0]=string | Alert box |
+| 54 | form_center | Addr_In[0]=tree | Center dialog |
+| 77 | graf_handle | — | Get VDI handle |
+| 78 | graf_mouse | In[0]=form | Set mouse shape |
+| 100 | wind_create | In[0]=kind, In[1-4]=rect | Create window |
+| 101 | wind_open | In[0]=handle, In[1-4]=rect | Open window |
+| 102 | wind_close | In[0]=handle | Close window |
+| 104 | wind_get | In[0]=handle, In[1]=field | Get attribute |
+| 105 | wind_set | In[0]=handle, In[1]=field | Set attribute |
+| 107 | wind_update | In[0]=flag(1-4) | Lock/unlock screen |
+| 110 | rsrc_load | Addr_In[0]=filename | Load .RSC file |
+| 112 | rsrc_gaddr | In[0]=type, In[1]=index | Get resource address |
+
+**evnt_multi flags**: MU_KEYBD=1, MU_BUTTON=2, MU_M1=4, MU_M2=8, MU_MESAG=$10, MU_TIMER=$20
+
+**Key messages**: MN_SELECTED=10, WM_REDRAW=20, WM_TOPPED=21, WM_CLOSED=22, WM_FULLED=23, WM_SIZED=27, WM_MOVED=28, AC_OPEN=40, AC_CLOSE=41, AP_TERM=50
+
+For full GEM reference see `gem-quick-ref.md`.
+
+---
+
+## GEM VDI Functions (TRAP #2, D0=115)
+
+Call convention: `MOVE.L #vdi_params,D1; MOVE.W #115,D0; TRAP #2` — no stack cleanup needed.
+
+Parameter block: VDI_Params → contrl[12], intin[128], ptsin[128], intout[128], ptsout[128].
+contrl[0]=opcode, contrl[5]=sub-opcode, contrl[6]=handle.
+
+| Opcode | Name | Description |
+|---|---|---|
+| 1 | v_opnwk | Open physical workstation |
+| 3 | v_clrwk | Clear workstation |
+| 6 | v_pline | Draw polyline |
+| 8 | v_gtext | Draw text |
+| 9 | v_fillarea | Draw filled area |
+| 12 | vst_height | Set text height (pixels) |
+| 15 | vsl_type | Set line style (1-7) |
+| 17 | vsl_color | Set line color |
+| 22 | vst_color | Set text color |
+| 23 | vsf_interior | Set fill type (0=hollow..4=user) |
+| 25 | vsf_color | Set fill color |
+| 32 | vswr_mode | Set writing mode (1=replace, 2=transparent, 3=XOR, 4=erase) |
+| 100 | v_opnvwk | Open virtual workstation |
+| 101 | v_clsvwk | Close virtual workstation |
+| 106 | vst_effects | Set text effects (bit field) |
+| 109 | vro_cpyfm | Raster copy opaque |
+| 114 | vr_recfl | Fill rectangle |
+| 125 | v_bar | Draw bar/filled rect |
+| 129 | vs_clip | Set clipping (intin[0]=on/off) |
+| 134 | vrt_cpyfm | Raster copy transparent |
+
+For full GEM reference see `gem-quick-ref.md`.
+
+---
+
 ## 68000 Exception Vector Table
 
 Vectors occupy addresses $000-$3FF in RAM. Each is a 32-bit pointer.

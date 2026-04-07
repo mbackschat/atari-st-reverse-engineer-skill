@@ -131,13 +131,14 @@ All reference documentation is bundled with the skill in `${CLAUDE_SKILL_DIR}/re
 | Path | Content | When to Use |
 |---|---|---|
 | `${CLAUDE_SKILL_DIR}/reference/tos-quick-ref.md` | Condensed TOS quick-reference (all calls, vectors, memory map) | Most annotation work |
+| `${CLAUDE_SKILL_DIR}/reference/gem-quick-ref.md` | Condensed GEM (AES/VDI) reference: parameter blocks, messages, patterns | Annotating GEM applications (TRAP #2) |
 | `${CLAUDE_SKILL_DIR}/reference/TOS.TXT` | Complete TOS system call reference (270 KB) | Deep system call analysis |
 | `${CLAUDE_SKILL_DIR}/reference/GEMDOS.TXT` | Full GEMDOS reference (file I/O, memory, console) | Annotating TRAP #1 calls |
 | `${CLAUDE_SKILL_DIR}/reference/BIOS.TXT` | BIOS quick reference | TRAP #13 overview |
 | `${CLAUDE_SKILL_DIR}/reference/BIOS_Calls _Trap_13.TXT` | BIOS Trap #13 detailed reference | Annotating TRAP #13 calls |
 | `${CLAUDE_SKILL_DIR}/reference/XBIOS.TXT` | XBIOS reference (screen, mouse, timers, sound) | Annotating TRAP #14 calls |
-| `${CLAUDE_SKILL_DIR}/reference/AES.md` | AES reference | GEM application analysis |
-| `${CLAUDE_SKILL_DIR}/reference/AES_CALL.TXT` | AES function calls (detailed) | AES call documentation |
+| `${CLAUDE_SKILL_DIR}/reference/AES.md` | Full AES reference with parameter tables (113 KB) | Deep AES call analysis |
+| `${CLAUDE_SKILL_DIR}/reference/AES_CALL.TXT` | AES function calls (legacy assembly format) | AES call documentation |
 | `${CLAUDE_SKILL_DIR}/reference/GDOS_INF.TXT` | GDOS reference | VDI/GDOS driver analysis |
 | `${CLAUDE_SKILL_DIR}/reference/68000_Assembly_Language.txt` | 68000 instruction set reference | Understanding opcodes |
 | `${CLAUDE_SKILL_DIR}/reference/INTRO68K.txt` | Introduction to 68000 programming | Architecture overview |

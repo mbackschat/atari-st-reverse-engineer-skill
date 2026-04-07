@@ -229,7 +229,13 @@ def write_annotations(path, block_comments, inline_comments, known_subs,
         f.write('SECTIONS = [\n')
         for sec in sorted(sections, key=lambda x: x[0]):
             offset = sec[0]
-            name = sec[1] if len(sec) > 1 else "Unknown"
+            # Handle both (offset, name) and (start, end, name) tuple formats
+            if len(sec) >= 3 and isinstance(sec[2], str):
+                name = sec[2]
+            elif len(sec) > 1:
+                name = str(sec[1]) if not isinstance(sec[1], str) else sec[1]
+            else:
+                name = "Unknown"
             safe = name.replace('\\', '\\\\').replace('"', '\\"')
             f.write(f'    (0x{offset:05X}, "{safe}"),\n')
         f.write(']\n\n\n')
